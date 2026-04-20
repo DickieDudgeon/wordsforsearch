@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Поиск по словарю</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 1000px;
+      margin: 30px auto;
+      padding: 0 20px;
+      background: #f7f7f7;
+      color: #222;
+    }
+
+    h1 {
+      margin-bottom: 10px;
+    }
+
+    .controls, .results {
+      background: white;
+      border-radius: 10px;
+      padding: 15px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      margin-bottom: 20px;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 12px;
+      font-size: 18px;
+      margin-bottom: 12px;
+    }
+
+    .modes {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+
+    .info {
+      font-size: 14px;
+      color: #555;
+    }
+
+    .results {
+      min-height: 150px;
+      max-height: 70vh;
+      overflow-y: auto;
+    }
+
+    .word {
+      padding: 6px 0;
+      border-bottom: 1px solid #eee;
+    }
+
+    .word:last-child {
+      border-bottom: none;
+    }
+
+    mark {
+      background: #ffe08a;
+      padding: 0 2px;
+    }
+
+    .loading {
+      color: #666;
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+  <h1>Поиск по словарю</h1>
+
+  <div class="controls">
+    <input type="text" id="searchInput" placeholder="Введите слово или часть слова..." disabled />
+
+    <div class="modes">
+      <label>
+        <input type="radio" name="searchMode" value="starts" checked />
+        Искать с начала
+      </label>
+      <label>
+        <input type="radio" name="searchMode" value="includes" />
+        Искать внутри слова
+      </label>
+    </div>
+
+    <div class="info" id="info">Загрузка словаря...</div>
+  </div>
+
+  <div class="results" id="results">
+    <div class="loading">Подождите, идёт загрузка словаря...</div>
+  </div>
+
+  <script>
+    let words = [];
+    let normalizedWords = [];
+    const MAX_RESULTS = 200;
+
+    const searchInput = document.getElementById("searchInput");
+    const results = document.getElementById("results");
+    const info = document.getElementById("info");
+    const modeInputs = document.querySelectorAll('input[name="searchMode"]');
+
+    function normalize(text) {
+      return text.toLowerCase().replace(/ё/g, "е");
+    }
+
+    function escapeHtml(text) {
+      return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    function getMode() {
+      return document.querySelector('input[name="searchMode"]:checked').value;
+    }
+
+    function highlightWord(word, query, mode) {
+      const lowerWord = normalize(word);
+      const lowerQuery = normalize(query);
+
+      if (!query) return escapeHtml(word);
+
+      if (mode === "starts" && lowerWord.startsWith(lowerQuery)) {
+        const start = word.slice(0, query.length);
+        const rest = word.slice(query.length);
+        return `<mark>${escapeHtml(start)}</mark>${escapeHtml(rest)}`;
+      }
+
+      if (mode === "includes") {
+        const index = lowerWord.indexOf(lowerQuery);
+        if (index !== -1) {
+          const before = word.slice(0, index);
+          const match = word.slice(index, index + query.length);
+          const after = word.slice(index + query.length);
+          return `${escapeHtml(before)}<mark>${escapeHtml(match)}</mark>${escapeHtml(after)}`;
+        }
+      }
+
+      return escapeHtml(word);
+    }
+
+    function searchWords() {
+      const query = searchInput.value.trim();
+      const normalizedQuery = normalize(query);
+      const mode = getMode();
+
+      if (!query) {
+        results.innerHTML = "";
+        info.textContent = `Словарь загружен: ${words.length} слов`;
+        return;
+      }
+
+      const found = [];
+      for (let i = 0; i < normalizedWords.length; i++) {
+        const w = normalizedWords[i];
+
+        if (
+          (mode === "starts" && w.startsWith(normalizedQuery)) ||
+          (mode === "includes" && w.includes(normalizedQuery))
+        ) {
+          found.push(words[i]);
+          if (found.length >= MAX_RESULTS) break;
+        }
+      }
+
+      if (found.length === 0) {
+        info.textContent = "Ничего не найдено";
+        results.innerHTML = `<div class="word">Ничего не найдено</div>`;
+        return;
+      }
+
+      info.textContent = `Найдено: ${found.length}${found.length >= MAX_RESULTS ? ` (показаны первые ${MAX_RESULTS})` : ""}`;
+
+      results.innerHTML = found
+        .map(word => `<div class="word">${highlightWord(word, query, mode)}</div>`)
+        .join("");
+    }
+
+    async function loadWords() {
+      try {
+        const response = await fetch("words.txt");
+        if (!response.ok) {
+          throw new Error("Не удалось загрузить words.txt");
+        }
+
+        const text = await response.text();
+
+        words = text
+          .split(/\r?\n/)
+          .map(line => line.trim())
+          .filter(Boolean);
+
+        normalizedWords = words.map(normalize);
+
+        info.textContent = `Словарь загружен: ${words.length} слов`;
+        results.innerHTML = "";
+        searchInput.disabled = false;
+        searchInput.focus();
+      } catch (error) {
+        info.textContent = "Ошибка загрузки словаря";
+        results.innerHTML = `<div class="word">Ошибка: ${escapeHtml(error.message)}</div>
+          <div class="word">Если вы открыли HTML двойным кликом, запустите его через локальный сервер.</div>`;
+      }
+    }
+
+    searchInput.addEventListener("input", searchWords);
+    modeInputs.forEach(input => input.addEventListener("change", searchWords));
+
+    loadWords();
+  </script>
+</body>
+</html>
